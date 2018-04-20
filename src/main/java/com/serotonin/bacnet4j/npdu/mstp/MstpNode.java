@@ -49,7 +49,7 @@ abstract public class MstpNode implements Runnable {
     private static final byte PREAMBLE2 = (byte) 0xFF;
     private static final int MAX_FRAME_LENGTH = 501;
 
-    private enum ReadFrameState {
+    protected enum ReadFrameState {
         idle, preamble, header, headerCrc, data, dataCrc;
     }
 
@@ -73,13 +73,13 @@ abstract public class MstpNode implements Runnable {
     protected Clock clock;
 
     private SerialPortWrapper wrapper;
-    private OutputStream out;
-    private InputStream in;
+    protected OutputStream out;
+    protected InputStream in;
     private final byte[] readArray = new byte[512];
     private int readCount;
     private final Frame sendFrame = new Frame();
-    private final HeaderCRC sendHeaderCRC = new HeaderCRC();
-    private final DataCRC sendDataCRC = new DataCRC();
+    protected final HeaderCRC sendHeaderCRC = new HeaderCRC();
+    protected final DataCRC sendDataCRC = new DataCRC();
 
     Thread thread;
 
@@ -87,9 +87,9 @@ abstract public class MstpNode implements Runnable {
 
     private ReadFrameState state;
 
-    private String lastWriteError;
-    private long bytesOut;
-    private long bytesIn;
+    protected String lastWriteError;
+    protected long bytesOut;
+    protected long bytesIn;
 
     public MstpNode(final SerialPortWrapper wrapper, final byte thisStation) {
         this(wrapper.getCommPortId(), wrapper, thisStation);
@@ -169,7 +169,7 @@ abstract public class MstpNode implements Runnable {
      * several types of receive errors, in particular framing errors and overrun errors. ReceiveError shall be TRUE if
      * any of these errors is detected.
      */
-    private boolean receiveError;
+    protected boolean receiveError;
 
     /**
      * Substitute for the silence timer.
@@ -212,7 +212,7 @@ abstract public class MstpNode implements Runnable {
      * InputBufferSize-1. The maximum size of a frame is 501 octets. A smaller value for InputBufferSize may be used by
      * some implementations.
      */
-    private final ByteQueue inputBuffer = new ByteQueue(MAX_FRAME_LENGTH);
+    protected final ByteQueue inputBuffer = new ByteQueue(MAX_FRAME_LENGTH);
 
     /**
      * ReceivedInvalidFrame A Boolean flag set to TRUE by the Receive State Machine if an error is detected during the
@@ -305,7 +305,7 @@ abstract public class MstpNode implements Runnable {
         return clock.millis() - lastNonSilence;
     }
 
-    private void readInputStream() {
+    protected void readInputStream() {
         try {
             if (in.available() > 0) {
                 readCount = in.read(readArray);
@@ -458,7 +458,7 @@ abstract public class MstpNode implements Runnable {
         }
     }
 
-    private void data() {
+    protected void data() {
         if (silence() > Constants.FRAME_ABORT) {
             // Timeout
             receivedInvalidFrame = "Timeout reading data";
@@ -489,7 +489,7 @@ abstract public class MstpNode implements Runnable {
         }
     }
 
-    private void dataCrc() {
+    protected void dataCrc() {
         activity = true;
 
         if (!dataCRC.isOk())

@@ -44,7 +44,7 @@ import com.serotonin.bacnet4j.util.sero.SerialPortWrapper;
 public class MasterNode extends MstpNode {
     static final Logger LOG = LoggerFactory.getLogger(MasterNode.class);
 
-    private enum MasterNodeState {
+    protected enum MasterNodeState {
         idle, useToken, waitForReply, doneWithToken, passToken, noToken, pollForMaster, answerDataRequest
     }
 
@@ -85,7 +85,7 @@ public class MasterNode extends MstpNode {
 
     private int usageTimeout = Constants.USAGE_TIMEOUT;
 
-    private MasterNodeState state;
+    protected MasterNodeState state;
 
     private long replyDeadline;
     private Frame replyFrame;
@@ -215,7 +215,7 @@ public class MasterNode extends MstpNode {
             answerDataRequest();
     }
 
-    private void idle() {
+    protected void idle() {
         if (silence() >= Constants.NO_TOKEN) {
             // LostToken
             //            trace("idle:LostToken");
@@ -239,7 +239,7 @@ public class MasterNode extends MstpNode {
         }
     }
 
-    private void frame() {
+    protected void frame() {
         final FrameType type = frame.getFrameType();
 
         if (type == null) {
@@ -296,7 +296,7 @@ public class MasterNode extends MstpNode {
         }
     }
 
-    private void useToken() {
+    protected void useToken() {
         Frame frameToSend = null;
         synchronized (framesToSend) {
             if (!framesToSend.isEmpty())
@@ -332,7 +332,7 @@ public class MasterNode extends MstpNode {
         }
     }
 
-    private void waitForReply() {
+    protected void waitForReply() {
         if (silence() > Constants.REPLY_TIMEOUT) {
             // ReplyTimeout - assume that the request has failed
             //            debug("waitForReply:ReplyTimeout");
@@ -604,7 +604,7 @@ public class MasterNode extends MstpNode {
      * The ANSWER_DATA_REQUEST state is entered when a BACnet Data Expecting Reply, a Test_Request, or a proprietary
      * frame that expects a reply is received.
      */
-    private void answerDataRequest() {
+    protected void answerDataRequest() {
         synchronized (this) {
             if (replyFrame != null) {
                 // Reply
