@@ -326,7 +326,7 @@ public class AtomicWriteFileRequestTest {
                     new com.serotonin.bacnet4j.service.confirmed.AtomicWriteFileRequest.StreamAccess(
                             new SignedInteger(600), new OctetString("!@#$%".getBytes()))).handle(d1, null);
             final long changedTime = file.lastModified();
-            assertTrue(originalTime < changedTime);
+            assertTrue(originalTime <= changedTime);
         });
     }
 
