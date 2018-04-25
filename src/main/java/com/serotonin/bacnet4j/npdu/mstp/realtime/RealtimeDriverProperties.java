@@ -1,7 +1,7 @@
 /**
  * Copyright (C) 2018 Infinite Automation Software. All rights reserved.
  */
-package com.serotonin.bacnet4j.npdu.mstp;
+package com.serotonin.bacnet4j.npdu.mstp.realtime;
 
 import java.io.IOException;
 import java.io.InputStream;

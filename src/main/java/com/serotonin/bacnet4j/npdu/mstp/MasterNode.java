@@ -54,30 +54,30 @@ public class MasterNode extends MstpNode {
      * The MAC address of the node to which This Station passes the token. If the Next
      * Station is unknown, NS shall be equal to TS.
      */
-    private byte nextStation;
+    protected byte nextStation;
 
     /**
      * The MAC address of the node to which This Station last sent a Poll For Master. This is
      * used during token maintenance.
      */
-    private byte pollStation;
+    protected byte pollStation;
 
     /**
      * A counter of transmission retries used for Token and Poll For Master transmission.
      */
-    private int retryCount;
+    protected int retryCount;
 
     /**
      * A Boolean flag set to TRUE by the master machine if this node is the only known master node.
      */
-    private boolean soleMaster;
+    protected boolean soleMaster;
 
     /**
      * The number of tokens received by this node. When this counter reaches the value Npoll, the node
      * polls the address range between TS and NS for additional master nodes. TokenCount is set to one at
      * the end of the polling process.
      */
-    private int tokenCount;
+    protected int tokenCount;
 
     private int maxMaster = Constants.MAX_MASTER;
 
@@ -109,7 +109,7 @@ public class MasterNode extends MstpNode {
         validate(retryCount);
     }
 
-    private void validate(final int retryCount) {
+    protected void validate(final int retryCount) {
         final int is = thisStation & 0xff;
         if (is > 127)
             throw new IllegalArgumentException("thisStation cannot be greater than 127");

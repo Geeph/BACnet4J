@@ -53,7 +53,7 @@ abstract public class MstpNode implements Runnable {
         idle, preamble, header, headerCrc, data, dataCrc;
     }
 
-    private final String portId;
+    protected final String portId;
 
     //
     // Configuration
@@ -75,8 +75,8 @@ abstract public class MstpNode implements Runnable {
     private SerialPortWrapper wrapper;
     protected OutputStream out;
     protected InputStream in;
-    private final byte[] readArray = new byte[512];
-    private int readCount;
+    protected final byte[] readArray = new byte[512];
+    protected int readCount;
     private final Frame sendFrame = new Frame();
     protected final HeaderCRC sendHeaderCRC = new HeaderCRC();
     protected final DataCRC sendDataCRC = new DataCRC();
@@ -189,12 +189,12 @@ abstract public class MstpNode implements Runnable {
     /**
      * The data CRC accumulator.
      */
-    private final DataCRC dataCRC = new DataCRC();
+    protected final DataCRC dataCRC = new DataCRC();
 
     /**
      * Used as an index by the Receive State Machine, up to a maximum value of InputBufferSize.
      */
-    private int index;
+    protected int index;
 
     /**
      * Used to count the number of received octets or errors. This is used in the detection of link activity.

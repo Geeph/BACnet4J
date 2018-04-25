@@ -1,7 +1,7 @@
 /**
  * Copyright (C) 2018 Infinite Automation Software. All rights reserved.
  */
-package com.serotonin.bacnet4j.npdu.mstp;
+package com.serotonin.bacnet4j.npdu.mstp.realtime;
 
 import java.util.Arrays;
 import java.util.List;
@@ -46,6 +46,7 @@ public class RealtimeDriver {
         MSTP_IOC_GETMACADDRESS = ensureConstant("MSTP_IOC_GETMACADDRESS", driverConstants);
         F_SETFL = ensureConstant("F_SETFL", driverConstants);
         O_NONBLOCK = ensureConstant("O_NONBLOCK", driverConstants);
+        O_RDWR = ensureConstant("O_RDWR", driverConstants);
         FNDELAY = ensureConstant("FNDELAY", driverConstants);
         CLOCAL = ensureConstant("CLOCAL", driverConstants);
         HUPCL = ensureConstant("HUPCL", driverConstants);
@@ -69,6 +70,7 @@ public class RealtimeDriver {
         TIOCGSERIAL = ensureConstant("TIOCGSERIAL", driverConstants);
         TIOCSSERIAL = ensureConstant("TIOCSSERIAL", driverConstants);
         FIONREAD = ensureConstant("FIONREAD", driverConstants);
+        B38400 = ensureConstant("B38400", driverConstants);
     }
     
     private static int ensureConstant(String name, Properties constants) {
@@ -76,7 +78,10 @@ public class RealtimeDriver {
         if(value == null)
             throw new IllegalArgumentException("Missing realtime driver constant " + name);
         try {
-            return Integer.decode(value);
+            if(value.startsWith("0x") || value.startsWith("0X")) {
+                return Integer.parseUnsignedInt(value.substring(2), 16);
+            }
+            return Integer.parseInt(value);
         }catch(NumberFormatException e) {
             throw new IllegalArgumentException("Invalid format for realtime driver constant " + name + ". " + e.getMessage());
         }
@@ -92,13 +97,20 @@ public class RealtimeDriver {
         clib.ioctl(fd, MSTP_IOC_SETMACADDRESS, mac);
     }
     
+    public int setupPort(String port, int baud) {
+        int fd = clib.open(port, (O_RDWR | O_NONBLOCK));
+        
+        this.setupPort(fd, baud);
+        return fd;
+    }
+    
     /**
      * Configure the port via it's file descriptor
      * to use the driver.
      * 
      * @param portFileDescriptor
      */
-    public void setupPort(int fd) {
+    public void setupPort(int fd, int baud) {
         clib.fcntl(fd, F_SETFL, FNDELAY);
         
         //Get the line discipline
@@ -109,7 +121,8 @@ public class RealtimeDriver {
         termios.c_cflag = CREAD | CLOCAL;
         
         //set baud rate
-        //TODO If we don't want to use JSSC PORT: termios.c_cflag |= B57600; //Just for a change
+        //TODO this is a long in the c code
+        termios.c_cflag |= baud;
         
         //clear the HUPCL bit, close doesn't change DTR
         termios.c_cflag &= ~HUPCL;
@@ -157,19 +170,31 @@ public class RealtimeDriver {
      * @param cmd
      * @return
      */
-    public int ioctlRead(int fd, int cmd) {
+    public int ioctlRead(int handle, int cmd) {
         int[] data = new int[1];
-        clib.ioctl(fd, cmd, data);
+        clib.ioctl(handle, cmd, data);
         return data[0];
     }
     
-    public int available(int handle) {
-        int[] data = new int[1];
-        clib.ioctl(handle, FIONREAD, data);
-        return data[0];
-    }
+//    public int available(int handle) {
+//        //TODO this doesn't work with the driver I don't think.
+//        int[] data = new int[1];
+//        clib.ioctlJava(handle, FIONREAD, data);
+//        return data[0];
+//    }
     public int read(int handle, byte[] buffer, int length) {
         return clib.read(handle, buffer, length);
+    }
+    public int write(int handle, byte[] buffer, int count) {
+        return clib.write(handle, buffer, count);
+    }
+    
+    public void close(int handle) {
+        clib.close(handle);
+    }
+    
+    public void flush(int handle) {
+        clib.tcflush(handle, TCIFLUSH);
     }
     
     private final int N_MSTP;
@@ -177,6 +202,7 @@ public class RealtimeDriver {
     private final int MSTP_IOC_GETMACADDRESS;
     private final int F_SETFL;
     private final int O_NONBLOCK;
+    private final int O_RDWR;
     private final int FNDELAY;
     private final int CLOCAL;
     private final int HUPCL;
@@ -200,6 +226,7 @@ public class RealtimeDriver {
     private final int TIOCGSERIAL;
     private final int TIOCSSERIAL;
     private final int FIONREAD;
+    private final int B38400;
     
     public static class ClibDirectMapping implements Clib {
         @Override
@@ -252,7 +279,7 @@ public class RealtimeDriver {
     *
     * @author Terry Packer
     */
-   static class Termios extends Structure {
+   public static class Termios extends Structure {
 
        public int c_iflag;
        public int c_oflag;
@@ -284,7 +311,7 @@ public class RealtimeDriver {
     *
     * @author Terry Packer
     */
-   static class SerialStruct extends Structure {
+   public static class SerialStruct extends Structure {
 
        public int type;
        public int line;

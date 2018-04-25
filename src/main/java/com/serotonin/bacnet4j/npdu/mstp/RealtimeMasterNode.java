@@ -10,7 +10,9 @@ import java.util.Properties;
 
 import org.apache.commons.lang3.StringUtils;
 
+import com.serotonin.bacnet4j.npdu.mstp.realtime.RealtimeDriver;
 import com.serotonin.bacnet4j.transport.Transport;
+import com.serotonin.bacnet4j.util.sero.StreamUtils;
 
 
 /**
@@ -19,19 +21,29 @@ import com.serotonin.bacnet4j.transport.Transport;
  */
 public class RealtimeMasterNode extends MasterNode {
     
-    private final int portFileDescriptor;
+    private int portFileDescriptor;
     private final byte thisStation;
     private final RealtimeDriver driver;
-    
-    private ReadFrameState readFrameState;
+    private final int baud;
+
 
     
-    public RealtimeMasterNode(final String portId, final int portFileDescriptor, final InputStream in, 
-            final OutputStream out, final Properties driverProperties, final byte thisStation, final int retryCount) throws IllegalArgumentException {
+    public RealtimeMasterNode(final String portId, final InputStream in, 
+            final OutputStream out, final Properties driverProperties, final byte thisStation, final int retryCount, final int baud) throws IllegalArgumentException {
         super(portId, in, out, (byte)0xFF, retryCount);
-        this.portFileDescriptor = portFileDescriptor;
         this.thisStation = thisStation;
+        this.baud = baud;
         this.driver = new RealtimeDriver(driverProperties);
+    }
+    
+    @Override
+    protected void validate(final int retryCount) {
+        this.retryCount = retryCount;
+        nextStation = thisStation;
+        pollStation = thisStation;
+        tokenCount = Constants.POLL;
+        soleMaster = false;
+        state = MasterNodeState.idle;
     }
     
     @Override
@@ -55,8 +67,7 @@ public class RealtimeMasterNode extends MasterNode {
     @Override
     public void initialize(final Transport transport) throws Exception {
         super.initialize(transport);
-        readFrameState = ReadFrameState.idle;
-        driver.setupPort(portFileDescriptor);
+        portFileDescriptor = driver.setupPort(portId, baud);
         driver.setMac(portFileDescriptor, thisStation);
     }
     
@@ -64,17 +75,25 @@ public class RealtimeMasterNode extends MasterNode {
     protected void doCycle() {
         readFrame();
 
-        if (state == MasterNodeState.idle)
+        if (state == MasterNodeState.idle) {
             idle();
-
-        if (state == MasterNodeState.useToken)
+            state = MasterNodeState.useToken;
+        }
+        
+        if(state == MasterNodeState.useToken)
             useToken();
+        
+        if(state == MasterNodeState.doneWithToken)
+            state = MasterNodeState.idle;
 
         if (state == MasterNodeState.waitForReply)
             waitForReply();
 
         if (state == MasterNodeState.answerDataRequest)
             answerDataRequest();
+        
+        //TODO Remove when done debugging
+        try {Thread.sleep(500);}catch(InterruptedException e) {}
     }
     
     @Override
@@ -85,26 +104,7 @@ public class RealtimeMasterNode extends MasterNode {
             // EatAnError
             receiveError = false;
             eventCount++;
-            readFrameState = ReadFrameState.idle;
             activity = true;
-        }
-        
-        if (!receivedValidFrame) {
-            if (readFrameState == ReadFrameState.idle)
-                readSourceAddress();
-
-            if (readFrameState == ReadFrameState.data)
-                data();
-
-            if (readFrameState == ReadFrameState.dataCrc)
-                dataCrc();
-        }
-    }
-    
-    private void readSourceAddress() {
-        if(inputBuffer.size() > 0) {
-            frame.setSourceAddress(inputBuffer.pop());
-            readFrameState = ReadFrameState.data;
         }
     }
     
@@ -128,26 +128,38 @@ public class RealtimeMasterNode extends MasterNode {
         try {
             if (LOG.isTraceEnabled())
                 LOG.trace(tracePrefix() + "out: " + frame);
+            System.out.println("out: " + frame);
             
             // Header
-            out.write(frame.getFrameType().id & 0xff);
-            out.write(frame.getDestinationAddress() & 0xff);
-            out.write(frame.getSourceAddress() & 0xff);
-            out.write(frame.getLength() >> 8 & 0xff);
-            out.write(frame.getLength() & 0xff);
-            out.write(sendHeaderCRC.getCrc(frame));
+            byte[] buffer = new byte[5 + frame.getLength()];
+            int pos = 0;
+            buffer[pos++] = frame.getFrameType().id;
+            buffer[pos++] = frame.getDestinationAddress();
+            buffer[pos++] = frame.getSourceAddress();
+            buffer[pos++] = (byte)(frame.getLength() >> 8 & 0xff);
+            buffer[pos++] = (byte)(frame.getLength() & 0xff);
+            
+           // out.write(frame.getFrameType().id & 0xff);
+           // out.write(frame.getDestinationAddress() & 0xff);
+           // out.write(frame.getSourceAddress() & 0xff);
+           // out.write(frame.getLength() >> 8 & 0xff);
+           // out.write(frame.getLength() & 0xff);
+            //Driver doesn't want CRC out.write(sendHeaderCRC.getCrc(frame));
             bytesOut += 8;
 
             if (frame.getLength() > 0) {
                 // Data
-                out.write(frame.getData());
-                final int crc = sendDataCRC.getCrc(frame);
-                out.write(crc & 0xff);
-                out.write(crc >> 8 & 0xff);
-                bytesOut += frame.getLength() + 2;
+                //out.write(frame.getData());
+                for(int i=0; i<frame.getLength(); i++)
+                    buffer[pos++] = frame.getData()[i];
+                //No CRC with Driver
+                //final int crc = sendDataCRC.getCrc(frame);
+                //out.write(crc & 0xff);
+                //out.write(crc >> 8 & 0xff);
+                bytesOut += frame.getLength(); // + 2;
             }
-
-            out.flush();
+            out.write(buffer);
+            //out.flush(); //Probably don't need it...
         } catch (final IOException e) {
             // Only write the same error message once. Prevents logs from getting filled up unnecessarily with repeated
             // error messages.
@@ -159,4 +171,39 @@ public class RealtimeMasterNode extends MasterNode {
         }
     }
     
+    @Override
+    protected long silence() {
+        return 0l;
+    }
+
+    
+    @Override
+    protected void readInputStream() {
+        try {
+            while((readCount = in.read(readArray)) > 0) {
+                bytesIn += readCount;
+                if (LOG.isTraceEnabled())
+                    LOG.trace(tracePrefix() + "in: " + StreamUtils.dumpArrayHex(readArray, 0, readCount));
+                inputBuffer.push(readArray, 0, readCount);
+                eventCount += readCount;
+                //Assume the driver supplies a full message every time
+                //TODO Must we determine a frame type???? HOW?!!
+                int pos = 0;
+                frame.setSourceAddress(readArray[pos++]);
+                byte[] data = new byte[readCount - 1];
+                for(int i=0; i<readCount - 1; i++) {
+                    data[i] = readArray[pos++];
+                }
+                frame.setData(data);
+                receivedDataNoReply(frame);
+                //receivedDataNeedingReply(frame);
+            }
+        } catch (final IOException e) {
+            if (StringUtils.equals(e.getMessage(), "Stream closed."))
+                throw new RuntimeException(e);
+            if (LOG.isDebugEnabled())
+                LOG.debug(thisStation + " Input stream listener exception", e);
+            receiveError = true;
+        }
+    }
 }
