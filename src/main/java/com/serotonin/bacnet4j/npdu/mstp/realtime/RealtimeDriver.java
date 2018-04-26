@@ -44,6 +44,13 @@ public class RealtimeDriver {
         N_MSTP = ensureConstant("N_MSTP", driverConstants);
         MSTP_IOC_SETMACADDRESS = ensureConstant("MSTP_IOC_SETMACADDRESS", driverConstants);
         MSTP_IOC_GETMACADDRESS = ensureConstant("MSTP_IOC_GETMACADDRESS", driverConstants);
+        MSTP_IOC_SETMAXMASTER = ensureConstant("MSTP_IOC_SETMAXMASTER", driverConstants);
+        MSTP_IOC_GETMAXMASTER = ensureConstant("MSTP_IOC_GETMAXMASTER", driverConstants);
+        MSTP_IOC_SETMAXINFOFRAMES = ensureConstant("MSTP_IOC_SETMAXINFOFRAMES", driverConstants);
+        MSTP_IOC_GETMAXINFOFRAMES = ensureConstant("MSTP_IOC_GETMAXINFOFRAMES", driverConstants);
+        MSTP_IOC_GETTUSAGE = ensureConstant("MSTP_IOC_GETTUSAGE", driverConstants);
+        MSTP_IOC_SETTUSAGE = ensureConstant("MSTP_IOC_SETTUSAGE", driverConstants);
+        MSTP_IOC_GETVER = ensureConstant("MSTP_IOC_GETVER", driverConstants);
         F_SETFL = ensureConstant("F_SETFL", driverConstants);
         O_NONBLOCK = ensureConstant("O_NONBLOCK", driverConstants);
         O_RDWR = ensureConstant("O_RDWR", driverConstants);
@@ -69,8 +76,20 @@ public class RealtimeDriver {
         TIOCSETSD = ensureConstant("TIOCSETSD", driverConstants);
         TIOCGSERIAL = ensureConstant("TIOCGSERIAL", driverConstants);
         TIOCSSERIAL = ensureConstant("TIOCSSERIAL", driverConstants);
-        FIONREAD = ensureConstant("FIONREAD", driverConstants);
-        B38400 = ensureConstant("B38400", driverConstants);
+        B110 = ensureConstant("B110", driverConstants);;
+        B300 = ensureConstant("B300", driverConstants);;
+        B1200 = ensureConstant("B1200", driverConstants);;
+        B2400 = ensureConstant("B2400", driverConstants);;
+        B4800 = ensureConstant("B4800", driverConstants);;
+        B9600 = ensureConstant("B9600", driverConstants);;
+        B19200 = ensureConstant("B19200", driverConstants);;
+        B38400 = ensureConstant("B38400", driverConstants);;
+        B57600 = ensureConstant("B57600", driverConstants);;
+        B76800 = ensureConstant("B76800", driverConstants);;
+        B115200 = ensureConstant("B115200", driverConstants);;
+        B230400 = ensureConstant("B230400", driverConstants);;
+        B460800 = ensureConstant("B460800", driverConstants);;
+        B921600 = ensureConstant("B921600", driverConstants);;
     }
     
     private static int ensureConstant(String name, Properties constants) {
@@ -97,6 +116,44 @@ public class RealtimeDriver {
         clib.ioctl(fd, MSTP_IOC_SETMACADDRESS, mac);
     }
     
+    public int getMac(int fd) {
+        return ioctlRead(fd, MSTP_IOC_GETMACADDRESS);
+    }
+    
+    public void setMaxMaster(int fd, byte maxMaster) throws LastErrorException{
+        clib.ioctl(fd, MSTP_IOC_SETMAXMASTER, maxMaster);
+    }
+    
+    public int getMaxMaster(int fd) {
+        return ioctlRead(fd, MSTP_IOC_GETMAXMASTER);
+    }
+    
+    public void setMaxInfoFrames(int fd, byte maxInfoFrames) {
+        clib.ioctl(fd, MSTP_IOC_SETMAXINFOFRAMES, maxInfoFrames);
+    }
+    
+    public int getMaxInfoFrames(int fd) {
+        return ioctlRead(fd, MSTP_IOC_GETMAXINFOFRAMES);
+    }
+    
+    public void setTUsage(int fd, byte usageTimeout) {
+        clib.ioctl(fd, MSTP_IOC_SETTUSAGE, usageTimeout);
+    }
+    
+    public int getTUsage(int fd) {
+        return ioctlRead(fd, MSTP_IOC_GETTUSAGE);
+    }
+    
+    public int getDriverVersion(int fd) {
+        return ioctlRead(fd, MSTP_IOC_GETVER);
+    }
+    
+    /**
+     * Configure the port.
+     * @param port
+     * @param baud
+     * @return
+     */
     public int setupPort(String port, int baud) {
         int fd = clib.open(port, (O_RDWR | O_NONBLOCK));
         
@@ -121,8 +178,7 @@ public class RealtimeDriver {
         termios.c_cflag = CREAD | CLOCAL;
         
         //set baud rate
-        //TODO this is a long in the c code
-        termios.c_cflag |= baud;
+        termios.c_cflag |= getBaudCode(baud);
         
         //clear the HUPCL bit, close doesn't change DTR
         termios.c_cflag &= ~HUPCL;
@@ -173,15 +229,10 @@ public class RealtimeDriver {
     public int ioctlRead(int handle, int cmd) {
         int[] data = new int[1];
         clib.ioctl(handle, cmd, data);
+        System.out.println("ioctlRead: " + data);
         return data[0];
     }
-    
-//    public int available(int handle) {
-//        //TODO this doesn't work with the driver I don't think.
-//        int[] data = new int[1];
-//        clib.ioctlJava(handle, FIONREAD, data);
-//        return data[0];
-//    }
+
     public int read(int handle, byte[] buffer, int length) {
         return clib.read(handle, buffer, length);
     }
@@ -197,9 +248,51 @@ public class RealtimeDriver {
         clib.tcflush(handle, TCIFLUSH);
     }
     
+    public int getBaudCode(int baudrate) {
+        switch(baudrate) {
+            case 110:
+                return B110;
+            case 300:
+                return B300;
+            case 1200:
+                return B1200;
+            case 2400:
+                return B2400;
+            case 4800:
+                return B4800;
+            case 9600:
+                return B9600;
+            case 19200:
+                return B19200;
+            case 38400:
+                return B38400;
+            case 57600:
+                return B57600;
+            case 76800:
+                return B76800;
+            case 115200:
+                return B115200;
+            case 230400:
+                return B230400;
+            case 460800:
+                return B460800;
+            case 921600:
+                return B921600;
+            default:
+                throw new IllegalArgumentException("Invalid BAUD rate: " + baudrate);
+        }
+    }
+    
     private final int N_MSTP;
     private final int MSTP_IOC_SETMACADDRESS;
     private final int MSTP_IOC_GETMACADDRESS;
+    private final int MSTP_IOC_SETMAXMASTER;
+    private final int MSTP_IOC_GETMAXMASTER;
+    private final int MSTP_IOC_SETMAXINFOFRAMES;
+    private final int MSTP_IOC_GETMAXINFOFRAMES;
+    private final int MSTP_IOC_GETTUSAGE;
+    private final int MSTP_IOC_SETTUSAGE;
+    private final int MSTP_IOC_GETVER;
     private final int F_SETFL;
     private final int O_NONBLOCK;
     private final int O_RDWR;
@@ -225,8 +318,20 @@ public class RealtimeDriver {
     private final int TIOCSETSD;
     private final int TIOCGSERIAL;
     private final int TIOCSSERIAL;
-    private final int FIONREAD;
+    private final int B110;
+    private final int B300;
+    private final int B1200;
+    private final int B2400;
+    private final int B4800;
+    private final int B9600;
+    private final int B19200;
     private final int B38400;
+    private final int B57600;
+    private final int B76800;
+    private final int B115200;
+    private final int B230400;
+    private final int B460800;
+    private final int B921600;
     
     public static class ClibDirectMapping implements Clib {
         @Override

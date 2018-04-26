@@ -8,7 +8,6 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.Properties;
 
 import com.serotonin.bacnet4j.LocalDevice;
@@ -18,6 +17,8 @@ import com.serotonin.bacnet4j.event.ExceptionListener;
 import com.serotonin.bacnet4j.npdu.Network;
 import com.serotonin.bacnet4j.npdu.mstp.MstpNetwork;
 import com.serotonin.bacnet4j.npdu.mstp.RealtimeMasterNode;
+import com.serotonin.bacnet4j.npdu.mstp.RealtimeMasterNode.RealtimeDriverInputStream;
+import com.serotonin.bacnet4j.npdu.mstp.RealtimeMasterNode.RealtimeDriverOutputStream;
 import com.serotonin.bacnet4j.service.unconfirmed.WhoIsRequest;
 import com.serotonin.bacnet4j.transport.DefaultTransport;
 import com.serotonin.bacnet4j.transport.Transport;
@@ -25,7 +26,6 @@ import com.serotonin.bacnet4j.type.enumerated.PropertyIdentifier;
 import com.serotonin.bacnet4j.type.primitive.CharacterString;
 import com.serotonin.bacnet4j.type.primitive.UnsignedInteger;
 import com.serotonin.bacnet4j.util.sero.ByteQueue;
-import com.serotonin.bacnet4j.util.sero.ThreadUtils;
 
 /**
  *
@@ -49,8 +49,8 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
         
         try {
             RealtimeDriverTest test = new RealtimeDriverTest(properties);
-            //test.sendSimpleWhois();
-            test.sendBACnet4JWhois();
+            test.sendSimpleWhois();
+            //test.sendBACnet4JWhois();
         } catch (Exception e) {
             e.printStackTrace();
         } 
@@ -59,7 +59,6 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
 
     private final Properties driverProperties;
     private final RealtimeDriver driver;
-    
     
     protected byte thisStation = 18;
     protected int retryCount = 1;
@@ -85,7 +84,18 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
         int fd = -1;
         try {
             fd = this.driver.setupPort(this.portName, this.baud);
+            
             this.driver.setMac(fd, thisStation);
+            System.out.println("Mac: " + this.driver.getMac(fd));
+            
+            this.driver.setMaxInfoFrames(fd, (byte)99);
+            System.out.println("MaxInfoFrames: " + driver.getMaxInfoFrames(fd));
+            
+            this.driver.setMaxMaster(fd, (byte)96);
+            System.out.println("MaxMaster: " + driver.getMaxMaster(fd));
+            
+            this.driver.setTUsage(fd, (byte)95); //Was 75 pfmtimeout?
+            System.out.println("TUsage: " + driver.getTUsage(fd));
             
             RealtimeDriverInputStream is = new RealtimeDriverInputStream(driver, fd);
             RealtimeDriverOutputStream os = new RealtimeDriverOutputStream(driver, fd);
@@ -130,45 +140,28 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
     
     
     public void sendBACnet4JWhois() throws Exception {
+        RealtimeMasterNode masterNode = new RealtimeMasterNode(portName, driverProperties, thisStation, retryCount, this.baud);
+        Network network = new MstpNetwork(masterNode, localNetworkNumber);
+        Transport transport = new DefaultTransport(network);
+        transport.setTimeout(Transport.DEFAULT_TIMEOUT);
+        transport.setSegTimeout(Transport.DEFAULT_SEG_TIMEOUT);
+        transport.setSegWindow(Transport.DEFAULT_SEG_WINDOW);
+        transport.setRetries(Transport.DEFAULT_RETRIES);
         
-        int fd = -1;
-        try {
-            fd = this.driver.setupPort(this.portName, this.baud);
-            this.driver.setMac(fd, thisStation);
-            //Create the streams
-            try(
-                    RealtimeDriverInputStream is = new RealtimeDriverInputStream(driver, fd);
-                    RealtimeDriverOutputStream os = new RealtimeDriverOutputStream(driver, fd);
-                ){
-    
-                RealtimeMasterNode masterNode = new RealtimeMasterNode(portName, is, os, driverProperties, thisStation, retryCount, this.baud);
-                Network network = new MstpNetwork(masterNode, localNetworkNumber);
-                Transport transport = new DefaultTransport(network);
-                transport.setTimeout(Transport.DEFAULT_TIMEOUT);
-                transport.setSegTimeout(Transport.DEFAULT_SEG_TIMEOUT);
-                transport.setSegWindow(Transport.DEFAULT_SEG_WINDOW);
-                transport.setRetries(Transport.DEFAULT_RETRIES);
-                
-                LocalDevice localDevice = new LocalDevice(deviceId, transport);
-                localDevice.getDeviceObject().writePropertyInternal(PropertyIdentifier.objectName, new CharacterString("Test Device"));
-                localDevice.getDeviceObject().writePropertyInternal(PropertyIdentifier.vendorName, new CharacterString("InfiniteAutomation"));
-                localDevice.getDeviceObject().writePropertyInternal(PropertyIdentifier.modelName, new CharacterString("Mango Automation"));
+        LocalDevice localDevice = new LocalDevice(deviceId, transport);
+        localDevice.getDeviceObject().writePropertyInternal(PropertyIdentifier.objectName, new CharacterString("Test Device"));
+        localDevice.getDeviceObject().writePropertyInternal(PropertyIdentifier.vendorName, new CharacterString("InfiniteAutomation"));
+        localDevice.getDeviceObject().writePropertyInternal(PropertyIdentifier.modelName, new CharacterString("Mango Automation"));
+
+        localDevice.initialize();
+        localDevice.getEventHandler().addListener(this);
         
-                localDevice.initialize();
-                localDevice.getEventHandler().addListener(this);
-                
-                WhoIsRequest whoIs = new WhoIsRequest();
-                localDevice.getExceptionDispatcher().addListener(this);
-                localDevice.sendGlobalBroadcast(whoIs);
-                
-                //Get the responses
-                Thread.sleep(30000);
-            }
+        WhoIsRequest whoIs = new WhoIsRequest();
+        localDevice.getExceptionDispatcher().addListener(this);
+        localDevice.sendGlobalBroadcast(whoIs);
         
-        }finally {
-            if(fd > 0)
-                this.driver.close(fd);
-        }
+        //Get the responses
+        Thread.sleep(30000);
     }
 
     @Override
@@ -203,80 +196,6 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
         System.out.println(t.getMessage());
     }
     
-    class RealtimeDriverInputStream extends InputStream {
-        
-        private final RealtimeDriver driver;
-        private final int handle;
-        
-        public RealtimeDriverInputStream(RealtimeDriver driver, int handle) {
-            this.driver = driver;
-            this.handle = handle;
-        }
 
-        
-        @Override
-        public int read() throws IOException {
-            byte[] inBuffer = new byte[1];
-            while (true) {
-                int read = driver.read(handle, inBuffer, 1);
-                if (read < 1) {
-                    ThreadUtils.sleep(20);
-                    continue;
-                }
-                return inBuffer[0];
-            }
-        }
-        
-        @Override
-        public int read(final byte[] b, final int off, final int len) throws IOException {
-            if (len == 0) {
-                return 0;
-            }
-
-            final byte[] buf = new byte[len];
-            int length = driver.read(handle, buf, len);
-            if(length > 0) {
-                System.arraycopy(buf, 0, b, off, length);
-                System.out.println("Recieved: " );
-                for(int i=0; i<length; i++)
-                    System.out.print(String.format("0x%02X", buf[i]) + " ");
-                System.out.println();
-            }
-            return length;
-        }
-        
-        @Override
-        public int available() throws IOException {
-            throw new IOException("available(): Unsupported operation.");
-        }
-    }
-    
-    class RealtimeDriverOutputStream extends OutputStream {
-        
-        private final RealtimeDriver driver;
-        private final int handle;
-        
-        public RealtimeDriverOutputStream(RealtimeDriver driver, int handle) {
-            this.driver = driver;
-            this.handle = handle;
-        }
-
-        @Override
-        public void write(final int b) throws IOException {
-            driver.write(handle, new byte[] {(byte)b}, 1);
-        }
-
-        @Override
-        public void write(final byte[] buffer) throws IOException {
-            driver.write(handle, buffer, buffer.length);
-        }
-        /* (non-Javadoc)
-         * @see java.io.OutputStream#flush()
-         */
-        @Override
-        public void flush() throws IOException {
-            driver.flush(handle);
-        }
-    }
     
 }

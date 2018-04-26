@@ -79,11 +79,11 @@ public class MasterNode extends MstpNode {
      */
     protected int tokenCount;
 
-    private int maxMaster = Constants.MAX_MASTER;
+    protected int maxMaster = Constants.MAX_MASTER;
 
-    private int maxInfoFrames = Constants.MAX_INFO_FRAMES;
+    protected int maxInfoFrames = Constants.MAX_INFO_FRAMES;
 
-    private int usageTimeout = Constants.USAGE_TIMEOUT;
+    protected int usageTimeout = Constants.USAGE_TIMEOUT;
 
     protected MasterNodeState state;
 
