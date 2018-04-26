@@ -9,6 +9,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.serotonin.bacnet4j.LocalDevice;
 import com.serotonin.bacnet4j.RemoteDevice;
@@ -31,7 +32,7 @@ import com.serotonin.bacnet4j.util.sero.ByteQueue;
  *
  * @author Terry Packer
  */
-public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionListener{
+public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionListener {
     public static final int FRAME_TYPE_BACNET_DATA_NOT_EXPECTING_REPLY = 0x06;
     public static final int FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY = 0x05;
     
@@ -48,9 +49,15 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
         }
         
         try {
+            int runs = 10;
+            int expectedResponses = 3;
             RealtimeDriverTest test = new RealtimeDriverTest(properties);
-            test.sendSimpleWhois();
-            //test.sendBACnet4JWhois();
+            for(int i=0; i<runs; i++) {
+                //test.sendSimpleWhois(expectedResponses);
+                test.sendBACnet4JWhois(expectedResponses);
+                Thread.sleep(1000);
+            }
+            
         } catch (Exception e) {
             e.printStackTrace();
         } 
@@ -80,7 +87,7 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
         this.driver = new RealtimeDriver(driverProperties);
     }
     
-    public void sendSimpleWhois() throws Exception{
+    public void sendSimpleWhois(int expectedResponses) throws Exception{
         int fd = -1;
         try {
             fd = this.driver.setupPort(this.portName, this.baud);
@@ -120,7 +127,7 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
             System.out.println("Waiting for replies");
             int count = 0;
             byte[] inBuffer = new byte[25];
-            while(count< 60) {
+            while(count < expectedResponses) {
                 int read = is.read(inBuffer);
                 if(read > 0) {
                     System.out.print("Recieving (" + read + "): ");
@@ -128,9 +135,9 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
                         System.out.print(String.format("0x%02X", inBuffer[i]) + " ");
                     }
                     System.out.print("\n");
+                    count++;
                 }
                 Thread.sleep(500);
-                count++;
             }
         }finally {
             if(fd > 0)
@@ -139,8 +146,15 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
     }
     
     
-    public void sendBACnet4JWhois() throws Exception {
+    public void sendBACnet4JWhois(int expectedResponses) throws Exception {
         RealtimeMasterNode masterNode = new RealtimeMasterNode(portName, driverProperties, thisStation, retryCount, this.baud);
+        if(driverProperties.getProperty("MAX_MASTER") != null)
+            masterNode.setMaxMaster(Integer.parseInt(driverProperties.getProperty("MAX_MASTER")));
+        if(driverProperties.getProperty("MAX_INFO_FRAMES") != null)
+            masterNode.setMaxInfoFrames(Integer.parseInt(driverProperties.getProperty("MAX_INFO_FRAMES")));
+        if(driverProperties.getProperty("TUSAGE") != null)
+            masterNode.setUsageTimeout(Integer.parseInt(driverProperties.getProperty("TUSAGE")));
+        
         Network network = new MstpNetwork(masterNode, localNetworkNumber);
         Transport transport = new DefaultTransport(network);
         transport.setTimeout(Transport.DEFAULT_TIMEOUT);
@@ -153,15 +167,31 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
         localDevice.getDeviceObject().writePropertyInternal(PropertyIdentifier.vendorName, new CharacterString("InfiniteAutomation"));
         localDevice.getDeviceObject().writePropertyInternal(PropertyIdentifier.modelName, new CharacterString("Mango Automation"));
 
+        
+        AtomicInteger count = new AtomicInteger();
         localDevice.initialize();
-        localDevice.getEventHandler().addListener(this);
+        localDevice.getEventHandler().addListener(new DeviceEventAdapter() {
+            /* (non-Javadoc)
+             * @see com.serotonin.bacnet4j.event.DeviceEventAdapter#iAmReceived(com.serotonin.bacnet4j.RemoteDevice)
+             */
+            @Override
+            public void iAmReceived(RemoteDevice d) {
+                System.out.println("Recieved Iam from " +  d.getAddress());
+                count.incrementAndGet();
+            }
+        });
         
         WhoIsRequest whoIs = new WhoIsRequest();
         localDevice.getExceptionDispatcher().addListener(this);
         localDevice.sendGlobalBroadcast(whoIs);
-        
-        //Get the responses
-        Thread.sleep(30000);
+
+        for(int i=0; i<100; i++) {
+            if(count.get() >= expectedResponses)
+                break;
+            //Get the responses
+            Thread.sleep(500);
+        }
+        localDevice.terminate();
     }
 
     @Override

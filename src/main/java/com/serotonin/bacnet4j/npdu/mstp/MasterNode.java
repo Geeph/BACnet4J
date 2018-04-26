@@ -87,8 +87,8 @@ public class MasterNode extends MstpNode {
 
     protected MasterNodeState state;
 
-    private long replyDeadline;
-    private Frame replyFrame;
+    protected long replyDeadline;
+    protected Frame replyFrame;
 
     /**
      * Set to true the first time this node has received a token, indicating that it has joined the network.

@@ -172,7 +172,7 @@ public class RealtimeDriver {
         
         //Get the line discipline
         Termios termios = new Termios();
-        System.out.println("Getting Termios Struct");
+
         clib.tcgetattr(fd, termios);
 
         termios.c_cflag = CREAD | CLOCAL;
@@ -335,29 +335,29 @@ public class RealtimeDriver {
     
     public static class ClibDirectMapping implements Clib {
         @Override
-        native public int fcntl(int fd, int cmd, int arg) throws LastErrorException;
+        native synchronized public int fcntl(int fd, int cmd, int arg) throws LastErrorException;
         @Override
-        native public int open(String path, int flags) throws LastErrorException;
+        native synchronized public int open(String path, int flags) throws LastErrorException;
         @Override
-        native public int tcflush(int fd, int qs) throws LastErrorException;
+        native synchronized public int tcflush(int fd, int qs) throws LastErrorException;
         @Override
-        native public int close(int fd) throws LastErrorException;
+        native synchronized public int close(int fd) throws LastErrorException;
         @Override
-        native public int write(int fd, byte[] buffer, int count);
+        native synchronized public int write(int fd, byte[] buffer, int count);
         @Override
-        native public int read(int fd, byte[] buffer, int count);
+        native synchronized public int read(int fd, byte[] buffer, int count);
         @Override
-        native public int ioctl(int fd, int cmd, byte arg) throws LastErrorException;
+        native synchronized public int ioctl(int fd, int cmd, byte arg) throws LastErrorException;
         @Override
-        native public int ioctl(int fd, int cmd, int[] arg) throws LastErrorException;
+        native synchronized public int ioctl(int fd, int cmd, int[] arg) throws LastErrorException;
         @Override
-        native public int ioctl(int fd, int cmd, SerialStruct arg) throws LastErrorException;
+        native synchronized public int ioctl(int fd, int cmd, SerialStruct arg) throws LastErrorException;
         @Override
-        native public int tcgetattr(int fd, Termios termios) throws LastErrorException;
+        native synchronized public int tcgetattr(int fd, Termios termios) throws LastErrorException;
         @Override
-        native public int tcsetattr(int fd, int cmd, Termios termios) throws LastErrorException;
+        native synchronized public int tcsetattr(int fd, int cmd, Termios termios) throws LastErrorException;
         
-        public int ioctlJava(int fd, int cmd, int... arg) {
+        public synchronized int ioctlJava(int fd, int cmd, int... arg) {
             return ioctl(fd, cmd, arg);
         }
 

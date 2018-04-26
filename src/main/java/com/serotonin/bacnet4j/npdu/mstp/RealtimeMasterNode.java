@@ -28,12 +28,16 @@ public class RealtimeMasterNode extends MasterNode {
     private final byte thisStation;
     private final RealtimeDriver driver;
     private final int baud;
+    private int responseTimeoutMs = 1000; //TODO Make configurable
+    private long lastFrameSendTime; //Track response timeouts
     
     public RealtimeMasterNode(final String portId, final Properties driverProperties, final byte thisStation, final int retryCount, final int baud) throws IllegalArgumentException {
         super(portId, null, null, (byte)0xFF, retryCount);
         this.thisStation = thisStation;
         this.baud = baud;
         this.driver = new RealtimeDriver(driverProperties);
+        if(driverProperties.containsKey("RESPONSE_TIMEOUT_MS"))
+            responseTimeoutMs = Integer.parseInt(driverProperties.getProperty("RESPONSE_TIMEOUT_MS"));
     }
     
     @Override
@@ -82,34 +86,38 @@ public class RealtimeMasterNode extends MasterNode {
     
     @Override
     protected void doCycle() {
-        System.out.println("State: " + state);
+        //System.out.println("State: " + state);
+        //Read Frame will read the input stream for 1 valid message
+        //setReceivedValidFrame = true
         readFrame();
-
-        if (state == MasterNodeState.idle) {
-            idle();
-            state = MasterNodeState.useToken;
-        }
         
-        if(state == MasterNodeState.useToken)
+        if (state == MasterNodeState.idle)
+            idle();
+        
+        if (state == MasterNodeState.useToken)
             useToken();
         
         if(state == MasterNodeState.doneWithToken)
             state = MasterNodeState.idle;
-
-//        if (state == MasterNodeState.waitForReply)
-//            waitForReply();
-
-        if (state == MasterNodeState.answerDataRequest)
-            answerDataRequest();
         
+        if (state == MasterNodeState.waitForReply)
+            waitForReply();
+        
+        //TODO Can't currently get to this state since we don't have 
+        // the frame type from the driver so we have to do this every time
+        //if (state == MasterNodeState.answerDataRequest)
+        answerDataRequest();
+
         //TODO Remove when done debugging
-        try {Thread.sleep(500);}catch(InterruptedException e) {}
+        //try {Thread.sleep(500);}catch(InterruptedException e) {}
     }
-    
+
+    /* (non-Javadoc)
+     * @see com.serotonin.bacnet4j.npdu.mstp.MstpNode#readFrame()
+     */
     @Override
     protected void readFrame() {
         readInputStream();
-        
         if (receiveError) {
             // EatAnError
             receiveError = false;
@@ -117,29 +125,105 @@ public class RealtimeMasterNode extends MasterNode {
             activity = true;
         }
     }
-
+    
+    @Override
+    protected void readInputStream() {
+        try {
+            //Read 1 message from the driver
+            //TODO Oddly we get a segfault if we use the private readArray?
+            byte[] readArray = new byte[512];
+            readCount = in.read(readArray);
+            if(readCount > 0) {
+                bytesIn += readCount;
+                if (LOG.isTraceEnabled())
+                    LOG.trace(tracePrefix() + "in: " + StreamUtils.dumpArrayHex(readArray, 0, readCount));
+                
+                int pos = 0;
+                frame.setSourceAddress(readArray[pos++]);
+                byte[] data = new byte[readCount - 1];
+                for(int i=0; i<readCount - 1; i++) {
+                    data[i] = readArray[pos++];
+                }
+                frame.setData(data);
+                if (LOG.isTraceEnabled())
+                    LOG.trace("in: " + frame);
+                eventCount += readCount;
+                receivedValidFrame = true;
+            }
+        } catch (final IOException e) {
+            if (StringUtils.equals(e.getMessage(), "Stream closed."))
+                throw new RuntimeException(e);
+            if (LOG.isDebugEnabled())
+                LOG.debug(thisStation + " Input stream listener exception", e);
+            receiveError = true;
+        }
+    }
     
     @Override
     protected void idle() {
-        if (receivedInvalidFrame != null) {
-            // ReceivedInvalidFrame
-            if (LOG.isDebugEnabled())
-                LOG.debug(thisStation + " idle:Received invalid frame: " + receivedInvalidFrame);
-            receivedInvalidFrame = null;
-            activity = true;
-        } else if (receivedValidFrame) {
+        //Don't worry about invalid frames, assume we can use token if we didn't get a frame
+        if (receivedValidFrame) {
             frame();
             receivedValidFrame = false;
             activity = true;
+        }else {
+            //We can use the token
+            state = MasterNodeState.useToken;
         }
     }
+    
+    /* (non-Javadoc)
+     * @see com.serotonin.bacnet4j.npdu.mstp.MasterNode#frame()
+     */
+    @Override
+    protected void frame() {
+        receivedDataNoReply(frame);
+        
+        //TODO How to decide?  via NPDU or do we modify the driver
+        //state = MasterNodeState.answerDataRequest;
+        //replyDeadline = lastNonSilence + Constants.REPLY_DELAY;
+    }
+    
+    @Override
+    protected void waitForReply() {
+        if(lastFrameSendTime + responseTimeoutMs > clock.millis()) {
+            if (LOG.isDebugEnabled())
+                LOG.debug(thisStation + " waitForReply:ReplyTimeout");
+            state = MasterNodeState.idle;
+        }else if (receivedValidFrame) {
+            if (LOG.isDebugEnabled())
+                LOG.debug(thisStation + " waitForReply:ReceivedReply");
+            receivedDataNoReply(frame);
+            state = MasterNodeState.idle;
+            receivedValidFrame = false;
+        }
+    }
+    
+    /* (non-Javadoc)
+     * @see com.serotonin.bacnet4j.npdu.mstp.MasterNode#answerDataRequest()
+     */
+    @Override
+    protected void answerDataRequest() {
+        synchronized (this) {
+            if (replyFrame != null) {
+                // Reply
+                //                debug("answerDataRequest:Reply with " + replyFrame);
+                if (LOG.isDebugEnabled())
+                    LOG.debug(thisStation + " answerDataRequest:Reply");
+                sendFrame(replyFrame);
+                replyFrame = null;
+                state = MasterNodeState.idle;
+                activity = true;
+            }
+        }
+    }
+    
     
     @Override
     protected void sendFrame(final Frame frame) {
         try {
             if (LOG.isTraceEnabled())
                 LOG.trace(tracePrefix() + "out: " + frame);
-            System.out.println("out: " + frame);
             
             // Header
             byte[] buffer = new byte[5 + frame.getLength()];
@@ -171,6 +255,7 @@ public class RealtimeMasterNode extends MasterNode {
             }
             out.write(buffer);
             //out.flush(); //Probably don't need it...
+            lastFrameSendTime = clock.millis();
         } catch (final IOException e) {
             // Only write the same error message once. Prevents logs from getting filled up unnecessarily with repeated
             // error messages.
@@ -179,44 +264,6 @@ public class RealtimeMasterNode extends MasterNode {
                 LOG.error("Error while sending frame", e);
                 lastWriteError = e.getMessage();
             }
-        }
-    }
-    
-    @Override
-    protected long silence() {
-        return 0l;
-    }
-
-    
-    @Override
-    protected void readInputStream() {
-        try {
-            while((readCount = in.read(readArray)) > 0) {
-                bytesIn += readCount;
-                if (LOG.isTraceEnabled())
-                    LOG.trace(tracePrefix() + "in: " + StreamUtils.dumpArrayHex(readArray, 0, readCount));
-                inputBuffer.push(readArray, 0, readCount);
-                eventCount += readCount;
-                //Assume the driver supplies a full message every time
-                //TODO Must we determine a frame type???? HOW?!!
-                int pos = 0;
-                frame.setSourceAddress(readArray[pos++]);
-                byte[] data = new byte[readCount - 1];
-                for(int i=0; i<readCount - 1; i++) {
-                    data[i] = readArray[pos++];
-                }
-                frame.setData(data);
-                receivedDataNoReply(frame);
-                if(state == MasterNodeState.waitForReply)
-                    state = MasterNodeState.idle;
-                //receivedDataNeedingReply(frame);
-            }
-        } catch (final IOException e) {
-            if (StringUtils.equals(e.getMessage(), "Stream closed."))
-                throw new RuntimeException(e);
-            if (LOG.isDebugEnabled())
-                LOG.debug(thisStation + " Input stream listener exception", e);
-            receiveError = true;
         }
     }
     
@@ -241,33 +288,44 @@ public class RealtimeMasterNode extends MasterNode {
         
         @Override
         public int read() throws IOException {
-            byte[] inBuffer = new byte[1];
-            while (true) {
-                int read = driver.read(handle, inBuffer, 1);
-                if (read < 1) {
-                    ThreadUtils.sleep(20);
-                    continue;
-                }
-                return inBuffer[0];
-            }
+            //TODO This doesn't work well with the driver
+            throw new RuntimeException("Unsupported read()");
+//            byte[] inBuffer = new byte[1];
+//            while (true) {
+//                int read = driver.read(handle, inBuffer, 1);
+//                if (read < 1) {
+//                    ThreadUtils.sleep(20);
+//                    continue;
+//                }
+//                return inBuffer[0];
+//            }
+        }
+        
+        /* (non-Javadoc)
+         * @see java.io.InputStream#read(byte[])
+         */
+        @Override
+        public int read(byte[] b) throws IOException {
+            return driver.read(handle, b, b.length);
         }
         
         @Override
         public int read(final byte[] b, final int off, final int len) throws IOException {
-            if (len == 0) {
-                return 0;
-            }
-
-            final byte[] buf = new byte[len];
-            int length = driver.read(handle, buf, len);
-            if(length > 0) {
-                System.arraycopy(buf, 0, b, off, length);
-                System.out.println("Recieved: " );
-                for(int i=0; i<length; i++)
-                    System.out.print(String.format("0x%02X", buf[i]) + " ");
-                System.out.println();
-            }
-            return length;
+            throw new RuntimeException("Unsupported read(final byte[] b, final int off, final int len)");
+//            if (len == 0) {
+//                return 0;
+//            }
+//
+//            final byte[] buf = new byte[len];
+//            int length = driver.read(handle, buf, len);
+//            if(length > 0) {
+//                System.arraycopy(buf, 0, b, off, length);
+//                System.out.println("Recieved: " );
+//                for(int i=0; i<length; i++)
+//                    System.out.print(String.format("0x%02X", buf[i]) + " ");
+//                System.out.println();
+//            }
+//            return length;
         }
         
         @Override

@@ -154,7 +154,8 @@ abstract public class MstpNode implements Runnable {
         }
 
         try {
-            wrapper.close();
+            if(wrapper != null)
+                wrapper.close();
         } catch (final Exception e) {
             LOG.warn("", e);
         }
