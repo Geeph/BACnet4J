@@ -41,6 +41,7 @@ import com.serotonin.bacnet4j.exception.BACnetException;
 import com.serotonin.bacnet4j.exception.BACnetTimeoutException;
 import com.serotonin.bacnet4j.exception.ErrorAPDUException;
 import com.serotonin.bacnet4j.exception.RejectAPDUException;
+import com.serotonin.bacnet4j.exception.ServiceTooBigException;
 import com.serotonin.bacnet4j.service.acknowledgement.AcknowledgementService;
 import com.serotonin.bacnet4j.util.sero.ThreadUtils;
 
@@ -72,6 +73,8 @@ public class ServiceFutureImpl implements ServiceFuture, ResponseConsumer {
             // so only that one is currently handled.
             if (ex instanceof BACnetTimeoutException) {
                 throw new BACnetTimeoutException(ex.getMessage(), ex);
+            }else if(ex instanceof ServiceTooBigException) {
+                throw new ServiceTooBigException(ex.getMessage());
             }
             throw new BACnetException(ex.getMessage(), ex);
         }
