@@ -6,8 +6,11 @@ package com.serotonin.bacnet4j.npdu.mstp.realtime;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -18,8 +21,6 @@ import com.serotonin.bacnet4j.event.ExceptionListener;
 import com.serotonin.bacnet4j.npdu.Network;
 import com.serotonin.bacnet4j.npdu.mstp.MstpNetwork;
 import com.serotonin.bacnet4j.npdu.mstp.RealtimeMasterNode;
-import com.serotonin.bacnet4j.npdu.mstp.RealtimeMasterNode.RealtimeDriverInputStream;
-import com.serotonin.bacnet4j.npdu.mstp.RealtimeMasterNode.RealtimeDriverOutputStream;
 import com.serotonin.bacnet4j.service.unconfirmed.WhoIsRequest;
 import com.serotonin.bacnet4j.transport.DefaultTransport;
 import com.serotonin.bacnet4j.transport.Transport;
@@ -50,11 +51,12 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
         
         try {
             int runs = 10;
-            int expectedResponses = 3;
-            RealtimeDriverTest test = new RealtimeDriverTest(properties);
+            boolean useJNA = false;
+            RealtimeDriverTest test = new RealtimeDriverTest(properties, useJNA);
             for(int i=0; i<runs; i++) {
-                //test.sendSimpleWhois(expectedResponses);
-                test.sendBACnet4JWhois(expectedResponses);
+                System.out.println("Executing TEST #" + i);
+                //test.sendSimpleWhois();
+                test.sendBACnet4JWhois(useJNA);
                 Thread.sleep(1000);
             }
             
@@ -73,9 +75,10 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
     protected int deviceId = 1;
     protected String portName = "/dev/ttyUSB0";
     protected int baud = 34800;
+    protected int deviceCount = 3;
     
     
-    public RealtimeDriverTest(File properties) throws FileNotFoundException, IOException {
+    public RealtimeDriverTest(File properties, boolean useJNA) throws FileNotFoundException, IOException {
         driverProperties = new Properties();
         try(InputStream is = new FileInputStream(properties)){
             driverProperties.load(is);
@@ -84,12 +87,17 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
         this.thisStation = Byte.parseByte(driverProperties.getProperty("MAC"));
         this.portName = driverProperties.getProperty("PORT");
         this.baud = Integer.parseInt(driverProperties.getProperty("BAUD"));
-        this.driver = new RealtimeDriver(driverProperties);
+        this.driver = new RealtimeDriver(driverProperties, useJNA);
+        deviceCount = Integer.parseInt(driverProperties.getProperty("DEVICE_COUNT", "3"));
     }
     
-    public void sendSimpleWhois(int expectedResponses) throws Exception{
+    public void sendSimpleWhois() throws Exception{
         int fd = -1;
         try {
+            File file = new File(this.portName);
+            FileInputStream is = new FileInputStream(file);
+            FileOutputStream os = new FileOutputStream(file);
+            
             fd = this.driver.setupPort(this.portName, this.baud);
             
             this.driver.setMac(fd, thisStation);
@@ -103,9 +111,9 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
             
             this.driver.setTUsage(fd, (byte)95); //Was 75 pfmtimeout?
             System.out.println("TUsage: " + driver.getTUsage(fd));
-            
-            RealtimeDriverInputStream is = new RealtimeDriverInputStream(driver, fd);
-            RealtimeDriverOutputStream os = new RealtimeDriverOutputStream(driver, fd);
+
+//            RealtimeDriverInputStream is = new RealtimeDriverInputStream(driver, fd);
+//            RealtimeDriverOutputStream os = new RealtimeDriverOutputStream(driver, fd);
             
             //WHOIS Message, MAC will be set by underlying driver
             byte[] buffer = new byte[13];
@@ -124,10 +132,12 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
             buffer[12] = (byte)0x08;
             System.out.println("Sending WhoIs");
             os.write(buffer);
+            os.flush();
             System.out.println("Waiting for replies");
             int count = 0;
             byte[] inBuffer = new byte[25];
-            while(count < expectedResponses) {
+            int bailout = 0;
+            while(count < deviceCount) {
                 int read = is.read(inBuffer);
                 if(read > 0) {
                     System.out.print("Recieving (" + read + "): ");
@@ -137,6 +147,9 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
                     System.out.print("\n");
                     count++;
                 }
+                bailout++;
+                if(bailout > deviceCount + 100)
+                    break;
                 Thread.sleep(500);
             }
         }finally {
@@ -146,15 +159,16 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
     }
     
     
-    public void sendBACnet4JWhois(int expectedResponses) throws Exception {
-        RealtimeMasterNode masterNode = new RealtimeMasterNode(portName, driverProperties, thisStation, retryCount, this.baud);
+    public LocalDevice sendBACnet4JWhois(boolean useJNA) throws Exception {
+        RealtimeMasterNode masterNode = new RealtimeMasterNode(portName, driverProperties, thisStation, retryCount, this.baud, useJNA);
+
         if(driverProperties.getProperty("MAX_MASTER") != null)
             masterNode.setMaxMaster(Integer.parseInt(driverProperties.getProperty("MAX_MASTER")));
         if(driverProperties.getProperty("MAX_INFO_FRAMES") != null)
             masterNode.setMaxInfoFrames(Integer.parseInt(driverProperties.getProperty("MAX_INFO_FRAMES")));
         if(driverProperties.getProperty("TUSAGE") != null)
             masterNode.setUsageTimeout(Integer.parseInt(driverProperties.getProperty("TUSAGE")));
-        
+
         Network network = new MstpNetwork(masterNode, localNetworkNumber);
         Transport transport = new DefaultTransport(network);
         transport.setTimeout(Transport.DEFAULT_TIMEOUT);
@@ -180,18 +194,19 @@ public class RealtimeDriverTest extends DeviceEventAdapter implements ExceptionL
                 count.incrementAndGet();
             }
         });
-        
+        System.out.println("Sending WHOIS");
         WhoIsRequest whoIs = new WhoIsRequest();
         localDevice.getExceptionDispatcher().addListener(this);
         localDevice.sendGlobalBroadcast(whoIs);
 
         for(int i=0; i<100; i++) {
-            if(count.get() >= expectedResponses)
+            if(count.get() >= deviceCount)
                 break;
             //Get the responses
             Thread.sleep(500);
         }
         localDevice.terminate();
+        return localDevice;
     }
 
     @Override

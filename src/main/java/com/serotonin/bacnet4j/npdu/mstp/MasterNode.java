@@ -305,7 +305,6 @@ public class MasterNode extends MstpNode {
 
         if (frameToSend == null) {
             // NothingToSend
-            //            debug("useToken:NothingToSend");
             if (LOG.isDebugEnabled())
                 LOG.debug(thisStation + " useToken:NothingToSend");
             frameCount = maxInfoFrames;

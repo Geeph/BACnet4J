@@ -3,6 +3,8 @@
  */
 package com.serotonin.bacnet4j.npdu.mstp.realtime;
 
+import java.io.IOException;
+import java.lang.ProcessBuilder.Redirect;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
@@ -29,18 +31,23 @@ public class RealtimeDriver {
     static final Logger LOG = LoggerFactory.getLogger(RealtimeDriver.class);
     
     static ClibDirectMapping clib;
+
     
-    static {
-        Native.setProtected(true);
-        if(!Native.isProtected())
-            LOG.warn("Running in un-procted mode because the JVM's lack of protected JNA support.");
-        Native.loadLibrary(Platform.C_LIBRARY_NAME, Clib.class);
-        Native.register(ClibDirectMapping.class, NativeLibrary.getInstance(Platform.C_LIBRARY_NAME));
-        clib = new ClibDirectMapping();
-    }
-    
-    public RealtimeDriver(Properties driverConstants) {
+    public RealtimeDriver(Properties driverConstants, boolean useJNA) {
+        
+        if(useJNA && clib == null) {
+            Native.setProtected(true);
+            if(!Native.isProtected())
+                LOG.warn("Running in un-procted mode because the JVM's lack of protected JNA support.");
+            Native.loadLibrary(Platform.C_LIBRARY_NAME, Clib.class);
+            Native.register(ClibDirectMapping.class, NativeLibrary.getInstance(Platform.C_LIBRARY_NAME));
+            clib = new ClibDirectMapping();
+        }
+        
         //Load in the constants and validate they are all there.
+        CONFIG_PROGRAM_LOCATION = driverConstants.getProperty("CONFIG_PROGRAM_LOCATION");
+        if(CONFIG_PROGRAM_LOCATION == null)
+            throw new IllegalArgumentException("Missing realtime driver constant CONFIG_PROGRAM_LOCATION");
         N_MSTP = ensureConstant("N_MSTP", driverConstants);
         MSTP_IOC_SETMACADDRESS = ensureConstant("MSTP_IOC_SETMACADDRESS", driverConstants);
         MSTP_IOC_GETMACADDRESS = ensureConstant("MSTP_IOC_GETMACADDRESS", driverConstants);
@@ -76,20 +83,20 @@ public class RealtimeDriver {
         TIOCSETSD = ensureConstant("TIOCSETSD", driverConstants);
         TIOCGSERIAL = ensureConstant("TIOCGSERIAL", driverConstants);
         TIOCSSERIAL = ensureConstant("TIOCSSERIAL", driverConstants);
-        B110 = ensureConstant("B110", driverConstants);;
-        B300 = ensureConstant("B300", driverConstants);;
-        B1200 = ensureConstant("B1200", driverConstants);;
-        B2400 = ensureConstant("B2400", driverConstants);;
-        B4800 = ensureConstant("B4800", driverConstants);;
-        B9600 = ensureConstant("B9600", driverConstants);;
-        B19200 = ensureConstant("B19200", driverConstants);;
-        B38400 = ensureConstant("B38400", driverConstants);;
-        B57600 = ensureConstant("B57600", driverConstants);;
-        B76800 = ensureConstant("B76800", driverConstants);;
-        B115200 = ensureConstant("B115200", driverConstants);;
-        B230400 = ensureConstant("B230400", driverConstants);;
-        B460800 = ensureConstant("B460800", driverConstants);;
-        B921600 = ensureConstant("B921600", driverConstants);;
+        B110 = ensureConstant("B110", driverConstants);
+        B300 = ensureConstant("B300", driverConstants);
+        B1200 = ensureConstant("B1200", driverConstants);
+        B2400 = ensureConstant("B2400", driverConstants);
+        B4800 = ensureConstant("B4800", driverConstants);
+        B9600 = ensureConstant("B9600", driverConstants);
+        B19200 = ensureConstant("B19200", driverConstants);
+        B38400 = ensureConstant("B38400", driverConstants);
+        B57600 = ensureConstant("B57600", driverConstants);
+        B76800 = ensureConstant("B76800", driverConstants);
+        B115200 = ensureConstant("B115200", driverConstants);
+        B230400 = ensureConstant("B230400", driverConstants);
+        B460800 = ensureConstant("B460800", driverConstants);
+        B921600 = ensureConstant("B921600", driverConstants);
     }
     
     private static int ensureConstant(String name, Properties constants) {
@@ -156,7 +163,7 @@ public class RealtimeDriver {
      */
     public int setupPort(String port, int baud) {
         int fd = clib.open(port, (O_RDWR | O_NONBLOCK));
-        
+        //TODO If we don't need nonblocking int fd = clib.open(port, (O_RDWR));
         this.setupPort(fd, baud);
         return fd;
     }
@@ -283,6 +290,29 @@ public class RealtimeDriver {
         }
     }
     
+    /**
+     * @param portId
+     * @param baud
+     * @param thisStation
+     * @throws InterruptedException 
+     * @throws IOException 
+     */
+    public void configure(String portId, int baud, byte thisStation, int maxMaster, int maxInfoFrames, int usageTimeout) throws InterruptedException, IOException {
+        ProcessBuilder pb = new ProcessBuilder(CONFIG_PROGRAM_LOCATION, 
+                "-d" + portId,
+                "-b" + baud,
+                "-t" + thisStation,
+                "-m" + maxMaster,
+                "-f" + maxInfoFrames);
+                //TODO Fix app: "-u" + usageTimeout);
+        pb.redirectError(Redirect.INHERIT);
+        pb.redirectOutput(Redirect.INHERIT);
+        Process process = pb.start();
+        process.waitFor();
+        process.destroy();
+    }
+    
+    private final String CONFIG_PROGRAM_LOCATION;
     private final int N_MSTP;
     private final int MSTP_IOC_SETMACADDRESS;
     private final int MSTP_IOC_GETMACADDRESS;
@@ -463,4 +493,5 @@ public class RealtimeDriver {
            );
        }
    }
+
 }

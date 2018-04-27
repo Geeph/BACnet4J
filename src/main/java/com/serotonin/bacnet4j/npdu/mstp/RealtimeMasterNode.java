@@ -3,9 +3,13 @@
  */
 package com.serotonin.bacnet4j.npdu.mstp;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Properties;
 
 import org.apache.commons.lang3.StringUtils;
@@ -13,7 +17,6 @@ import org.apache.commons.lang3.StringUtils;
 import com.serotonin.bacnet4j.npdu.mstp.realtime.RealtimeDriver;
 import com.serotonin.bacnet4j.transport.Transport;
 import com.serotonin.bacnet4j.util.sero.StreamUtils;
-import com.serotonin.bacnet4j.util.sero.ThreadUtils;
 
 
 /**
@@ -28,14 +31,17 @@ public class RealtimeMasterNode extends MasterNode {
     private final byte thisStation;
     private final RealtimeDriver driver;
     private final int baud;
+    private final boolean useJNA;
     private int responseTimeoutMs = 1000; //TODO Make configurable
     private long lastFrameSendTime; //Track response timeouts
     
-    public RealtimeMasterNode(final String portId, final Properties driverProperties, final byte thisStation, final int retryCount, final int baud) throws IllegalArgumentException {
+    public RealtimeMasterNode(final String portId, final Properties driverProperties, final byte thisStation, 
+            final int retryCount, final int baud, boolean useJNA) throws IllegalArgumentException {
         super(portId, null, null, (byte)0xFF, retryCount);
         this.thisStation = thisStation;
         this.baud = baud;
-        this.driver = new RealtimeDriver(driverProperties);
+        this.useJNA = useJNA;
+        this.driver = new RealtimeDriver(driverProperties, useJNA);
         if(driverProperties.containsKey("RESPONSE_TIMEOUT_MS"))
             responseTimeoutMs = Integer.parseInt(driverProperties.getProperty("RESPONSE_TIMEOUT_MS"));
     }
@@ -73,22 +79,29 @@ public class RealtimeMasterNode extends MasterNode {
     
     @Override
     public void initialize(final Transport transport) throws Exception {
-        portFileDescriptor = driver.setupPort(portId, baud);
-        in = new RealtimeDriverInputStream(driver, portFileDescriptor);
-        out = new RealtimeDriverOutputStream(driver, portFileDescriptor);
-        driver.setMac(portFileDescriptor, thisStation);
-        driver.setMaxMaster(portFileDescriptor, (byte)this.maxMaster);
-        driver.setTUsage(portFileDescriptor, (byte)this.usageTimeout);
-        driver.setMaxInfoFrames(portFileDescriptor, (byte)this.maxInfoFrames);
-        
+        if(useJNA) {
+          portFileDescriptor = driver.setupPort(portId, baud);
+          driver.setMac(portFileDescriptor, thisStation);
+          driver.setMaxMaster(portFileDescriptor, (byte)this.maxMaster);
+          driver.setTUsage(portFileDescriptor, (byte)this.usageTimeout);
+          driver.setMaxInfoFrames(portFileDescriptor, (byte)this.maxInfoFrames);
+          in = new RealtimeDriverInputStream(driver, portFileDescriptor);
+          out = new RealtimeDriverOutputStream(driver, portFileDescriptor);
+        }else {
+            //Setup I/O
+            File file = new File(portId);
+            in = new FileInputStream(file);
+            out = new FileOutputStream(file);
+    
+            //Configure Driver
+            this.driver.configure(portId, baud, thisStation, maxMaster, maxInfoFrames, usageTimeout);
+        }
+
         super.initialize(transport);
     }
     
     @Override
     protected void doCycle() {
-        //System.out.println("State: " + state);
-        //Read Frame will read the input stream for 1 valid message
-        //setReceivedValidFrame = true
         readFrame();
         
         if (state == MasterNodeState.idle)
@@ -130,15 +143,18 @@ public class RealtimeMasterNode extends MasterNode {
     protected void readInputStream() {
         try {
             //Read 1 message from the driver
-            //TODO Oddly we get a segfault if we use the private readArray?
-            byte[] readArray = new byte[512];
-            readCount = in.read(readArray);
-            if(readCount > 0) {
+            LOG.info("About to read.");
+            while((readCount = in.read(readArray)) > 0) {
+                
+            //readCount = in.read(readArray);
+            LOG.info("Read: " + StreamUtils.dumpArrayHex(readArray, 0, readCount));
+            //if(readCount > 0) {
                 bytesIn += readCount;
                 if (LOG.isTraceEnabled())
                     LOG.trace(tracePrefix() + "in: " + StreamUtils.dumpArrayHex(readArray, 0, readCount));
                 
                 int pos = 0;
+                //frame.setFrameType(FrameType.bacnetDataNotExpectingReply);
                 frame.setSourceAddress(readArray[pos++]);
                 byte[] data = new byte[readCount - 1];
                 for(int i=0; i<readCount - 1; i++) {
@@ -163,6 +179,8 @@ public class RealtimeMasterNode extends MasterNode {
     protected void idle() {
         //Don't worry about invalid frames, assume we can use token if we didn't get a frame
         if (receivedValidFrame) {
+            if (LOG.isDebugEnabled())
+                LOG.debug(thisStation + " idle:receivedValidFrame");
             frame();
             receivedValidFrame = false;
             activity = true;
@@ -207,7 +225,6 @@ public class RealtimeMasterNode extends MasterNode {
         synchronized (this) {
             if (replyFrame != null) {
                 // Reply
-                //                debug("answerDataRequest:Reply with " + replyFrame);
                 if (LOG.isDebugEnabled())
                     LOG.debug(thisStation + " answerDataRequest:Reply");
                 sendFrame(replyFrame);
@@ -221,18 +238,19 @@ public class RealtimeMasterNode extends MasterNode {
     
     @Override
     protected void sendFrame(final Frame frame) {
+        LOG.info("Sending frame: " + frame);
         try {
             if (LOG.isTraceEnabled())
                 LOG.trace(tracePrefix() + "out: " + frame);
             
             // Header
-            byte[] buffer = new byte[5 + frame.getLength()];
+            byte[] writeArray = new byte[5 + frame.getLength()];
             int pos = 0;
-            buffer[pos++] = frame.getFrameType().id;
-            buffer[pos++] = frame.getDestinationAddress();
-            buffer[pos++] = frame.getSourceAddress();
-            buffer[pos++] = (byte)(frame.getLength() >> 8 & 0xff);
-            buffer[pos++] = (byte)(frame.getLength() & 0xff);
+            writeArray[pos++] = frame.getFrameType().id;
+            writeArray[pos++] = frame.getDestinationAddress();
+            writeArray[pos++] = frame.getSourceAddress();
+            writeArray[pos++] = (byte)(frame.getLength() >> 8 & 0xff);
+            writeArray[pos++] = (byte)(frame.getLength() & 0xff);
             
            // out.write(frame.getFrameType().id & 0xff);
            // out.write(frame.getDestinationAddress() & 0xff);
@@ -246,16 +264,17 @@ public class RealtimeMasterNode extends MasterNode {
                 // Data
                 //out.write(frame.getData());
                 for(int i=0; i<frame.getLength(); i++)
-                    buffer[pos++] = frame.getData()[i];
+                    writeArray[pos++] = frame.getData()[i];
                 //No CRC with Driver
                 //final int crc = sendDataCRC.getCrc(frame);
                 //out.write(crc & 0xff);
                 //out.write(crc >> 8 & 0xff);
                 bytesOut += frame.getLength(); // + 2;
             }
-            out.write(buffer);
-            //out.flush(); //Probably don't need it...
+            out.write(writeArray);
+            out.flush();
             lastFrameSendTime = clock.millis();
+            LOG.info("Sent frame " + frame);
         } catch (final IOException e) {
             // Only write the same error message once. Prevents logs from getting filled up unnecessarily with repeated
             // error messages.
@@ -270,19 +289,27 @@ public class RealtimeMasterNode extends MasterNode {
     @Override
     public void terminate() {
         super.terminate();
-        if(portFileDescriptor > 0) {
-            this.driver.close(portFileDescriptor);
+        try {
+            in.close();
+            out.close();
+        } catch (IOException e) {
+            LOG.error("Error closing streams.", e);
         }
+//        if(portFileDescriptor > 0) {
+//            this.driver.close(portFileDescriptor);
+//        }
     }
     
     public static class RealtimeDriverInputStream extends InputStream {
         
         private final RealtimeDriver driver;
         private final int handle;
+        private final ArrayList<byte[]> history;
         
         public RealtimeDriverInputStream(RealtimeDriver driver, int handle) {
             this.driver = driver;
             this.handle = handle;
+            this.history = new ArrayList<>();
         }
 
         
@@ -306,6 +333,7 @@ public class RealtimeMasterNode extends MasterNode {
          */
         @Override
         public int read(byte[] b) throws IOException {
+            history.add(b);
             return driver.read(handle, b, b.length);
         }
         
@@ -338,20 +366,24 @@ public class RealtimeMasterNode extends MasterNode {
         
         private final RealtimeDriver driver;
         private final int handle;
+        private final ArrayList<byte[]> history;
         
         public RealtimeDriverOutputStream(RealtimeDriver driver, int handle) {
             this.driver = driver;
             this.handle = handle;
+            this.history = new ArrayList<>();
         }
 
         @Override
         public void write(final int b) throws IOException {
-            driver.write(handle, new byte[] {(byte)b}, 1);
+            throw new RuntimeException("Unsupported write(b)");
+            //driver.write(handle, new byte[] {(byte)b}, 1);
         }
 
         @Override
         public void write(final byte[] buffer) throws IOException {
             driver.write(handle, buffer, buffer.length);
+            history.add(buffer);
         }
         /* (non-Javadoc)
          * @see java.io.OutputStream#flush()
