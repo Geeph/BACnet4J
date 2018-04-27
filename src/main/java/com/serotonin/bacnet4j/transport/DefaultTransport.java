@@ -367,8 +367,7 @@ public class DefaultTransport implements Transport, Runnable {
 
             final UnackedMessageContext ctx = new UnackedMessageContext(localDevice.getClock(), timeout, retries,
                     consumer, service);
-            final UnackedMessageKey key = unackedMessages.addClient(address, linkService, ctx);
-
+            final UnackedMessageKey key;
             APDU apdu;
 
             // Check if we need to segment the message.
@@ -382,6 +381,7 @@ public class DefaultTransport implements Transport, Runnable {
                 if (segmentsRequired > 128)
                     throw new ServiceTooBigException("Request too big to send to device; too many segments required");
 
+                key = unackedMessages.addClient(address, linkService, ctx);
                 // Prepare the segmenting session.
                 ctx.setSegmentTemplate(new ConfirmedRequest(true, true, true, MAX_SEGMENTS, network.getMaxApduLength(),
                         key.getInvokeId(), 0, segWindow, service.getChoiceId(), null, service.getNetworkPriority()));
@@ -390,11 +390,13 @@ public class DefaultTransport implements Transport, Runnable {
 
                 // Send an initial message to negotiate communication terms.
                 apdu = ctx.getSegmentTemplate().clone(true, 0, segWindow, ctx.getNextSegment());
-            } else
+            } else {
+                key = unackedMessages.addClient(address, linkService, ctx);
                 // We can send the whole APDU in one shot.
                 apdu = new ConfirmedRequest(false, false, true, MAX_SEGMENTS, network.getMaxApduLength(),
                         key.getInvokeId(), (byte) 0, 0, service.getChoiceId(), serviceData,
                         service.getNetworkPriority());
+            }
 
             ctx.setOriginalApdu(apdu);
             sendForResponse(key, ctx);
