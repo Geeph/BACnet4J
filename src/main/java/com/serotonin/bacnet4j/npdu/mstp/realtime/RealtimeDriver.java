@@ -303,8 +303,8 @@ public class RealtimeDriver {
                 "-b" + baud,
                 "-t" + thisStation,
                 "-m" + maxMaster,
-                "-f" + maxInfoFrames);
-                //TODO Fix app: "-u" + usageTimeout);
+                "-f" + maxInfoFrames,
+                "-u" + usageTimeout);
         pb.redirectError(Redirect.INHERIT);
         pb.redirectOutput(Redirect.INHERIT);
         Process process = pb.start();
